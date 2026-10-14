@@ -167,6 +167,8 @@ details summary{cursor:pointer;font-weight:700;padding:6px 0}
   var C = window.APP_CFG || {}, FB = '10.12.2';
   window.PUSH = true;
   var P = { msg: '', busy: false, st: null, prompt: null };
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); P.prompt = e; if (window.S && S.sub === 'push') render(); });
+  window.addEventListener('appinstalled', function () { P.prompt = null; });
   function ua() { return navigator.userAgent || ''; }
   function esIos() { return /iphone|ipad|ipod/i.test(ua()) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
   function instalada() { return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }
@@ -201,10 +203,30 @@ details summary{cursor:pointer;font-weight:700;padding:6px 0}
     try { localStorage.setItem('pushTok', tok); } catch (e) {}
   }
   window.pushInit = async function () {            // cada vez que se abre la app: si ya tenía permiso, se vuelve a ligar el celular a esta persona
-    window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); P.prompt = e; if (S.sub === 'push') render(); });
+    setTimeout(oferta, 1800);                      // al entrar se ofrece instalar la app y activar los avisos
     if (!soporta() || Notification.permission !== 'granted' || !tokGuardado()) return;
     try { var t = await obtenerToken(); if (t) await registrar(t); } catch (e) {}
   };
+  /* ---- oferta automática: instalar la app y activar notificaciones ---- */
+  function pospuesta() { try { return +localStorage.getItem('pushPosp') > Date.now(); } catch (e) { return false; } }
+  function yaActivas() { return soporta() && Notification.permission === 'granted' && !!tokGuardado(); }
+  function ofertaHtml() {
+    var inst = instalada(), ios = esIos(), h = '<div class="mb"><h3>🔔 Instala la app y recibe avisos</h3><p class="mut" style="margin-top:0">Así te llegan al celular, aunque la app esté cerrada: pendientes antes del corte' + (S.user.rol === 'admin' ? ', pedidos nuevos, enviados y recibidos' : '') + '.</p>';
+    if (!inst) {
+      if (ios) h += '<div class="card" style="margin:0 0 8px"><b>1. Instala la app</b><ol style="padding-left:20px;line-height:1.6;margin:6px 0 0"><li>Abre esta página en <b>Safari</b>.</li><li>Toca <b>Compartir</b> (cuadro con flecha).</li><li>Elige <b>Agregar a pantalla de inicio</b>.</li><li>Abre la app desde el <b>ícono nuevo</b>: ahí te pedirá activar los avisos.</li></ol></div>';
+      else if (P.prompt) h += '<div class="card" style="margin:0 0 8px"><b>1. Instala la app</b><p class="mut" style="margin:4px 0 8px">Abre a pantalla completa y desde su ícono.</p><button class="big" data-act="pushOfInst">📲 Instalar la app</button></div>';
+    }
+    if (inst || !ios) {
+      h += '<div class="card" style="margin:0 0 8px"><b>' + (!inst && P.prompt ? '2. ' : '') + 'Activa las notificaciones</b>' + (P.msg ? '<div class="alert" style="margin:6px 0">' + esc(P.msg) + '</div>' : '') + '<button class="pri big" style="margin-top:8px" data-act="pushOfOn">🔔 Activar notificaciones</button></div>';
+    }
+    return h + '<div class="btns"><button data-act="pushOfNo">Ahora no</button></div></div>';
+  }
+  function oferta() {
+    if (!window.S || !S.user || !soporta() && !esIos()) return;
+    if (yaActivas() || pospuesta() || (soporta() && Notification.permission === 'denied')) return;
+    var m = document.getElementById('modal'); if (m && m.style.display === 'flex') return;
+    P.msg = ''; openModal(ofertaHtml());
+  }
   window.vPush = function () {
     var h = '<div class="card"><h3>🔔 Notificaciones</h3>', perm = soporta() ? Notification.permission : 'no', tok = tokGuardado();
     if (!instalada() && esIos()) {
@@ -231,17 +253,27 @@ details summary{cursor:pointer;font-weight:700;padding:6px 0}
     var a = el.dataset.act;
     if (a === 'sub') { P.msg = ''; P.st = null; estadoInit(); return; }
     if (a === 'pushInst') { if (P.prompt) { P.prompt.prompt(); P.prompt = null; } return; }
-    if (a === 'pushOn') {
+    if (a === 'pushOn' || a === 'pushOfOn') {
       P.msg = '';
+      var ok = false;
       try {
         var perm = await Notification.requestPermission();
-        if (perm !== 'granted') { P.msg = 'No se dio el permiso. Para recibir avisos acepta las notificaciones.'; render(); return; }
-        var t = await run(obtenerToken());
-        if (!t) throw new Error('No se pudo obtener el permiso de Firebase');
-        await run(registrar(t)); P.st = 'on'; toast('Notificaciones activadas ✔');
+        if (perm !== 'granted') { P.msg = 'No se dio el permiso. Para recibir avisos acepta las notificaciones.'; }
+        else {
+          var t = await run(obtenerToken());
+          if (!t) throw new Error('No se pudo obtener el permiso de Firebase');
+          await run(registrar(t)); P.st = 'on'; ok = true; toast('Notificaciones activadas ✔');
+        }
       } catch (e) { P.msg = e.message || 'No se pudo activar'; }
+      if (a === 'pushOfOn') { if (ok) closeModal(); else openModal(ofertaHtml()); }
       render(); return;
     }
+    if (a === 'pushOfInst') {
+      if (P.prompt) { var pr = P.prompt; P.prompt = null; pr.prompt(); try { await pr.userChoice; } catch (e) {} }
+      openModal('<div class="mb"><h3>✅ App instalada</h3><p>Ahora cierra esta pestaña y abre <b>Control Operativo desde su ícono nuevo</b>: ahí activas las notificaciones.</p><div class="btns"><button class="pri" data-act="mCancel">Entendido</button></div></div>');
+      return;
+    }
+    if (a === 'pushOfNo') { try { localStorage.setItem('pushPosp', String(Date.now() + 864e5)); } catch (e) {} closeModal(); return; }
     if (a === 'pushOff') {
       try { await run(call('pushDel', { token: tokGuardado() })); localStorage.removeItem('pushTok'); P.st = 'off'; toast('Desactivadas en este celular'); } catch (e) {}
       render(); return;
@@ -360,7 +392,7 @@ async function doLogin() {
 }
 function applyBoot(b) {
   S.user = b.user; S.sucs = b.sucs; S.suc = b.suc; S.cfgUrl = b.cfgUrl; S.team = b.team; S.cat = b.cat; S.pend = b.pend; S.brand = b.brand || S.brand;
-  S.hoy = b.hoy; S.turnoAhora = b.turnoAhora; S.corte = b.corte; S.alerta = b.alerta || 60;
+  S.urlNueva = b.urlNueva || ''; S.hoy = b.hoy; S.turnoAhora = b.turnoAhora; S.corte = b.corte; S.alerta = b.alerta || 60;
 }
 function initDefaults() {
   var u = S.user;
@@ -393,6 +425,7 @@ async function bootApp(suc, pre) {
   var qt = (location.search.match(/[?&]tab=(tar|lim|ped|res|mas)\b/) || [])[1];            // al tocar una notificación se abre en la pestaña del aviso
   if (qt && !gp && !S.qtOk) { S.qtOk = 1; tab(qt); }
   if (window.pushInit) pushInit();
+  nlAviso();
 }
 async function refresh() {
   applyBoot(await run(call('boot')));
@@ -418,7 +451,7 @@ function render() {
   $('#app').innerHTML =
     '<div id="hd">' + lg + '<div class="t"><b>' + esc(u.nombre) + '</b><small>' + esc(sub) + '</small></div>' + sel +
     '<span id="bellw">' + bellHtml() + '</span><button class="sm" data-act="logout">Salir</button></div>' +
-    '<div id="main">' + view() + '</div>' +
+    '<div id="main">' + nlBanner() + view() + '</div>' +
     '<div id="nav">' + (gatePaso() ? '' : navHtml()) + '</div>';
   window.scrollTo(0, y);
 }
@@ -453,6 +486,17 @@ function opts(list, cur, ph) {
   return '<option value="">' + esc(ph || 'Selecciona…') + '</option>' + list.map(function (n) { return '<option' + (n === cur ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('');
 }
 function setPath(k, v) { var p = k.split('.'); S[p[0]][p[1]] = v; }
+/* ---- aviso: hay una liga nueva (solo se muestra en la liga vieja de Apps Script) ---- */
+function nlOn() { return !window.API_URL && !!S.urlNueva; }
+function nlBanner() {
+  if (!nlOn()) return '';
+  return '<a class="ab warn" style="animation:none;text-decoration:none;color:inherit" href="' + esc(S.urlNueva) + '" target="_blank" rel="noopener"><span class="ai">📲</span><div><b>Hay una liga nueva de Control Operativo</b><br>Úsala para instalar la app y recibir notificaciones. <u>Toca aquí para abrirla.</u></div></a>';
+}
+function nlAviso() {
+  if (!nlOn() || S.nlVisto) return;
+  S.nlVisto = 1;
+  openModal('<div class="mb"><h3>📲 Hay una liga nueva</h3><p>Control Operativo ahora se abre desde una <b>liga nueva</b>. Ahí puedes <b>instalar la app en tu celular</b> y <b>recibir notificaciones</b> de pendientes y pedidos.</p><p class="mut" style="word-break:break-all;margin:0 0 10px">' + esc(S.urlNueva) + '</p><div class="btns" style="flex-direction:column"><a href="' + esc(S.urlNueva) + '" target="_blank" rel="noopener" style="display:block;text-align:center;padding:12px;border-radius:8px;background:var(--or);color:var(--onor);font-weight:700;text-decoration:none">Abrir la nueva app</a><button data-act="mCancel">Seguir aquí por ahora</button></div></div>');
+}
 function loadingCard(m) { return '<div class="card mut">' + esc(m || 'Cargando…') + '</div>'; }
 
 /* ================= avisos (campana) ================= */
