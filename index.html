@@ -296,7 +296,8 @@ function today() { return S.hoy || devHoy(); }
 function addD(f, n) { var a = f.split('-'), d = new Date(Date.UTC(+a[0], +a[1] - 1, +a[2] + n)); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
 var DSEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 function fmtF(f) { var a = String(f).split('-'); if (a.length < 3) return f; var d = new Date(Date.UTC(+a[0], +a[1] - 1, +a[2])); return DSEM[d.getUTCDay()] + ' ' + (+a[2]) + '/' + (+a[1]); }
-var TURNOS = ['Matutino', 'Vespertino'], AREAS = ['Cocina', 'Barra', 'Servicio'];
+var TURNOS = ['Matutino', 'Vespertino'], TURNOSU = ['Matutino', 'Vespertino', 'Mixto'], AREAS = ['Cocina', 'Barra', 'Servicio'];
+function enT(tu, t) { return tu === t || tu === 'Mixto'; }              // 'Mixto' = cubre los dos turnos el mismo día
 var ROLN = { admin: 'Administrador', encargado_sucursal: 'Encargado de sucursal', encargado: 'Encargado de turno y área', colaborador: 'Colaborador' };
 var LBL = { Momento: 'Momento', Turno: 'Turno', Puesto: 'Área', Actividad: 'Actividad', Equipo: 'Equipo', Area: 'Área', DiasLimpieza: 'Limpiar cada (días)', Modo: 'Limpieza programada', Inicio: 'Inicia el', Categoria: 'Categoría', Articulo: 'Artículo', Unidad: 'Unidad', Proveedor: 'Proveedor', WhatsApp: 'WhatsApp (10 dígitos)', Contacto: 'Contacto', Desde: 'Abre (hora)', Hasta: 'Cierra (hora)', HastaDom: 'Cierra los domingos (solo si es distinto)', Cerrado: 'Días que no atiende (ej. dom, o sáb y dom)', Margen: 'Minutos antes del cierre en que ya no se puede pedir (vacío = 15; almacén = 0)', Grupo: 'Grupo', Tarea: 'Tarea', Compartida: 'Compartida (la hacen y marcan todas las personas del área)' };
 var CATS = {
@@ -379,6 +380,11 @@ function showLogin() {
   call('brand').then(function (b) {
     S.brand = b; var el = $('#lgs');
     if (el) el.innerHTML = b.filter(function (x) { return x.logo; }).map(function (x) { return '<img src="' + esc(x.logo) + '" alt="' + esc(x.suc) + '">'; }).join('');
+  }).catch(function () {});
+  if (!window.API_URL) call('liga').then(function (u) {            // aviso de la liga nueva desde la pantalla de acceso
+    S.urlNueva = u || '';
+    var c = $('#login .card');
+    if (c && nlOn()) { c.insertAdjacentHTML('afterbegin', nlBanner()); nlAviso(); }
   }).catch(function () {});
 }
 async function doLogin() {
@@ -776,7 +782,10 @@ async function progTick(n, hecho) {
   } catch (x) { loadLim(); }
 }
 function asigPersonaDlg(tit, sub, turno, area, actual, fn) {
-  var L = S.team.filter(function (x) { return x.turno === turno; }).sort(function (a, b) { return (b.area === area) - (a.area === area) || a.nombre.localeCompare(b.nombre); });
+  var tu = TURNOS.indexOf(turno) >= 0 ? turno : S.turnoAhora;                // si la tarea no trae turno, se usa el turno de ahora
+  var srt = function (a, b) { return (b.area === area) - (a.area === area) || a.nombre.localeCompare(b.nombre); };
+  var L = S.team.filter(function (x) { return enT(x.turno, tu); }).sort(srt);
+  if (!L.length) L = S.team.slice().sort(srt);                               // nunca se deja la lista vacía
   openModal('<div class="mb"><h3>' + esc(tit) + '</h3><p class="mut">' + esc(sub) + '</p><label>Quién la hace</label><select id="a_p"><option value="">(reparto automático)</option>' +
     L.map(function (x) { return '<option value="' + esc(x.nombre) + '"' + (x.nombre === actual ? ' selected' : '') + '>' + esc(x.nombre) + (x.area ? ' · ' + esc(x.area) : '') + '</option>'; }).join('') + '</select>' +
     '<div class="btns" style="margin-top:12px"><button data-act="mCancel">Cancelar</button><button class="pri" data-act="mOk">Guardar</button></div></div>');
@@ -916,11 +925,17 @@ function vTarSem(gate) {
   if (gate) h += '<button class="big pri" style="margin:6px 0" data-act="flOk" data-p="tar">✔ Listo, empezar el turno</button><button class="sm" style="margin-bottom:14px" data-act="flSkip" data-p="tar">Ver después</button>';
   return h;
 }
+function flMiembros() {                                                       // personas que se pueden elegir en la apertura: las presentes; si no hay, el equipo del turno
+  var m = (S.fl && S.fl.miembros) || [];
+  if (m.length) return m;
+  var tu = (S.fl && S.fl.turno) || S.turnoAhora, L = S.team.filter(function (x) { return enT(x.turno, tu); });
+  return (L.length ? L : S.team).map(function (x) { return x.nombre; });
+}
 function flSemDlg(eq, modo) {
   var x = S.fl.semana.filter(function (i) { return i.equipo === eq; })[0];
   if (!x) return;
   openModal('<div class="mb"><h3>' + (modo === 'adel' ? 'Adelantar a hoy' : 'Asignar') + ' · ' + esc(eq) + '</h3><p class="mut">' + (modo === 'adel' ? 'Se hace hoy y su ciclo vuelve a contar desde hoy (cada ' + x.n + ' días).' : 'Quién la hace hoy.') + '</p><label>Quién la hace</label><select id="s_u">' +
-    (modo === 'adel' ? '' : '<option value="">(sin asignar)</option>') + S.fl.miembros.map(function (n) { return '<option' + (n === x.asig ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select>' +
+    (modo === 'adel' ? '' : '<option value="">(sin asignar)</option>') + flMiembros().map(function (n) { return '<option' + (n === x.asig ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select>' +
     '<div class="btns" style="margin-top:12px"><button data-act="mCancel">Cancelar</button><button class="pri" data-act="mOk">Guardar</button></div></div>');
   MOK = async function () {
     try {
@@ -964,8 +979,8 @@ function filaLista(x, t, tipo) {
 function vLista(gate) {
   var p = S.plan, d = p.data, t = d.limit;
   var P = d.personas.slice().sort(function (a, b) { return a.nombre < b.nombre ? -1 : 1; });
-  var pres = P.filter(function (x) { return !x.ef.descansa && x.ef.turno === t; });
-  var aus = P.filter(function (x) { return x.ef.descansa && x.turno === t; });
+  var pres = P.filter(function (x) { return !x.ef.descansa && enT(x.ef.turno, t); });
+  var aus = P.filter(function (x) { return x.ef.descansa && enT(x.turno, t); });
   var otros = P.filter(function (x) { return pres.indexOf(x) < 0 && aus.indexOf(x) < 0; });
   var h = gate ? '' : '<div class="card"><h3>📋 Pasar lista · ' + esc(t) + ' · hoy</h3><p class="mut" style="margin:0 0 6px">Marca quién está presente. Las actividades se vuelven a repartir solas entre quienes sí están.</p></div>';
   h += '<div class="card"><h3>Presentes en ' + esc(t) + ' <span class="badge">' + pres.length + '</span></h3>' + (pres.length ? pres.map(function (x) { return filaLista(x, t, 'pres'); }).join('') : '<div class="mut">Nadie asignado a este turno.</div>') + '</div>';
@@ -1119,7 +1134,7 @@ function pedCard(p) {
     (viejo ? '<div class="alert" style="margin-top:8px">⚠ ' + (p.fesp ? 'Debía llegar ' + esc(fmtF(p.fesp)) + ' y no se ha confirmado la llegada.' : 'Enviado hace ' + dd(p.fenv) + ' días y sin confirmar llegada.') + '</div>' : '') +
     p.items.map(function (i) { return '<div class="li"><div class="n">' + esc(i.art) + '</div><b>' + fq(i.cant) + ' ' + esc(i.u) + '</b></div>'; }).join('') + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
   if (p.estado === 'En preparación') {
-    h += '<button class="sm" data-act="pedEdit" data-id="' + p.id + '">✏️ Editar</button>' + (col2 ? '' : '<button class="sm pri" data-act="pedTexto" data-id="' + p.id + '">📤 Enviar</button>') +
+    h += '<button class="sm good" data-act="pedAnadir" data-id="' + p.id + '">➕ Añadir artículos</button><button class="sm" data-act="pedEdit" data-id="' + p.id + '">✏️ Editar</button>' + (col2 ? '' : '<button class="sm pri" data-act="pedTexto" data-id="' + p.id + '">📤 Enviar</button>') +
       '<button class="sm dng" data-act="pedCancel" data-id="' + p.id + '">Cancelar pedido</button>';
   } else {
     h += '<button class="sm" data-act="pedTexto" data-id="' + p.id + '">📋 Ver texto</button>' + (p.estado === 'Enviado' && !col2 ? '<button class="sm good" data-act="pedRecibido" data-id="' + p.id + '">✔ Recibido</button>' : '');
@@ -1128,11 +1143,11 @@ function pedCard(p) {
 }
 function pedById(id) { return S.ped.data.pedidos.filter(function (p) { return p.id === id; })[0]; }
 /* ---- selector de artículos ---- */
-function openPed(nombre) {
+function openPed(nombre, addTo) {
   var dest = S.ped.data.destinos.filter(function (x) { return x.nombre === nombre; })[0];
   if (!dest) return;
-  PP = { dest: dest, q: '', sel: {}, all: false };
-  openModal('<div class="mb"><h3>' + (dest.tipo === 'ALM' ? '🏬 ' : '🚚 ') + esc(dest.nombre) + '</h3>' + (dest.est && dest.est.msg ? '<div class="' + horCls(dest.est) + '" style="margin:0 0 8px;font-size:13px">' + (horCls(dest.est) === 'alert' ? '⏰ ' : '🕘 ') + esc(dest.est.msg) + '</div>' : '') + '<div class="stk"><input id="ppq" placeholder="Buscar artículo…"><label style="display:flex;gap:8px;align-items:center;margin:6px 0 0"><input type="checkbox" id="ppall" style="width:auto"> Mostrar también artículos del otro turno</label></div>' +
+  PP = { dest: dest, q: '', sel: {}, all: false, addTo: addTo || '' };
+  openModal('<div class="mb"><h3>' + (dest.tipo === 'ALM' ? '🏬 ' : '🚚 ') + esc(dest.nombre) + (PP.addTo ? ' · añadir al pedido' : '') + '</h3>' + (dest.est && dest.est.msg ? '<div class="' + horCls(dest.est) + '" style="margin:0 0 8px;font-size:13px">' + (horCls(dest.est) === 'alert' ? '⏰ ' : '🕘 ') + esc(dest.est.msg) + '</div>' : '') + '<div class="stk"><input id="ppq" placeholder="Buscar artículo…"><label style="display:flex;gap:8px;align-items:center;margin:6px 0 0"><input type="checkbox" id="ppall" style="width:auto"> Mostrar también artículos del otro turno</label></div>' +
     '<div class="scr" id="ppl"></div><div id="pps"></div>' +
     '<div class="row2" style="grid-template-columns:1fr auto;margin-top:6px"><input id="ppo" placeholder="Otro artículo (escribir)"><button data-act="ppOtro">Agregar</button></div>' +
     '<div class="btns" style="margin-top:8px"><button data-act="mCancel">Cancelar</button><button class="pri" data-act="ppGuardar" id="ppg">Guardar pedido</button></div></div>');
@@ -1172,13 +1187,17 @@ function ppRefresh() {
   var l = $('#ppl'), sc = l ? l.scrollTop : 0;
   if (l) { l.innerHTML = ppLista(); l.scrollTop = sc; }
   var s = $('#pps'); if (s) s.innerHTML = ppSel();
-  var g = $('#ppg'); if (g) g.textContent = 'Guardar pedido' + (Object.keys(PP.sel).length ? ' (' + Object.keys(PP.sel).length + ')' : '');
+  var g = $('#ppg'); if (g) g.textContent = (PP.addTo ? 'Añadir al pedido' : 'Guardar pedido') + (Object.keys(PP.sel).length ? ' (' + Object.keys(PP.sel).length + ')' : '');
 }
 function ppGuardar() {
   var ks = Object.keys(PP.sel);
   if (!ks.length) { toast('Selecciona al menos un artículo', 1); return; }
   for (var i = 0; i < ks.length; i++) { var c = Number(String(PP.sel[ks[i]].cant).replace(',', '.')); if (!(c > 0)) { toast('Pon la cantidad de ' + ks[i], 1); return; } }
-  var dest = PP.dest.nombre, ab = pedAbierto(dest);
+  var dest = PP.dest.nombre, ab = PP.addTo ? pedById(PP.addTo) : pedAbierto(dest);
+  if (PP.addTo) {                                                 // se añade directo al pedido elegido, sin preguntar
+    if (!ab || ab.estado !== 'En preparación') { closeModal(); toast('Ese pedido ya se envió o se canceló. Crea uno nuevo.', 1); loadPed(); return; }
+    PP.ab = ab; ppDupDlg(); return;
+  }
   if (ab) {
     var tx = 'Hay un pedido a ' + dest + ' sin enviar, capturado por ' + ab.por + ' (' + ab.turno + ', ' + ab.hora + ') con ' + ab.items.length + ' artículo(s).\n\n¿Lo que agregas se suma a ese pedido, o es un pedido nuevo?';
     openModal('<div class="mb"><h3>Pedido a ' + esc(dest) + '</h3><p style="white-space:pre-line">' + esc(tx) + '</p><div class="btns" style="flex-direction:column"><button class="pri" data-act="ppModo" data-m="AGREGAR">Agregar a ese pedido (aún no se envía)</button><button data-act="ppModo" data-m="NUEVO">Es un pedido nuevo</button><button data-act="ppVolver">Volver a la lista</button></div></div>');
@@ -1195,7 +1214,7 @@ function ppGuardar() {
   }
   ppEnviar('NUEVO');
 }
-function ppVolver() { var sel = PP.sel, dest = PP.dest.nombre; openPed(dest); PP.sel = sel; ppRefresh(); }
+function ppVolver() { var sel = PP.sel, dest = PP.dest.nombre, at = PP.addTo; openPed(dest, at); PP.sel = sel; ppRefresh(); }
 function ppDupDlg() {
   var ab = PP.ab, ks = Object.keys(PP.sel), dup = ks.filter(function (k) { return ab.items.some(function (i) { return i.art.toLowerCase() === k.toLowerCase(); }); });
   if (!dup.length) { ppEnviar('AGREGAR', ab.id, {}); return; }
@@ -1502,7 +1521,7 @@ function vTeam() {
   }).join('') +
     '<div class="grp">Agregar persona</div><label>Nombre</label><input id="t_n">' +
     '<div class="row2"><div><label>Rol</label><select id="t_r">' + roles.map(function (r) { return '<option value="' + r + '">' + ROLN[r] + '</option>'; }).join('') + '</select></div>' +
-    '<div><label>Turno</label><select id="t_t">' + TURNOS.map(function (t) { return '<option>' + t + '</option>'; }).join('') + '</select></div></div>' +
+    '<div><label>Turno</label><select id="t_t">' + TURNOSU.map(function (t) { return '<option value="' + t + '">' + (t === 'Mixto' ? 'Mixto (los dos turnos)' : t) + '</option>'; }).join('') + '</select></div></div>' +
     '<label>Área</label><select id="t_a">' + AREAS.map(function (a) { return '<option>' + a + '</option>'; }).join('') + '</select>' +
     '<div class="row2"><div><label>Usuario</label><input id="t_u" autocapitalize="none" autocorrect="off"></div><div><label>Contraseña</label><input id="t_p" type="text" autocomplete="off"></div></div>' +
     '<button class="pri big" data-act="teamAdd">Agregar</button></div>';
@@ -1512,7 +1531,7 @@ function teamEditDlg(n) {
   if (!p) return;
   var admin = S.user.rol === 'admin', roles = admin ? ['encargado_sucursal', 'encargado', 'colaborador'] : ['encargado', 'colaborador'], propio = n === S.user.nombre;
   openModal('<div class="mb"><h3>' + esc(n) + '</h3><div class="scr">' + (propio ? '' : '<label>Rol</label><select id="e_r">' + roles.map(function (r) { return '<option value="' + r + '"' + (r === p.rol ? ' selected' : '') + '>' + ROLN[r] + '</option>'; }).join('') + '</select>') +
-    '<div class="row2"><div><label>Turno</label><select id="e_t">' + TURNOS.map(function (t) { return '<option' + (t === p.turno ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></div>' +
+    '<div class="row2"><div><label>Turno</label><select id="e_t">' + TURNOSU.map(function (t) { return '<option value="' + t + '"' + (t === p.turno ? ' selected' : '') + '>' + (t === 'Mixto' ? 'Mixto (los dos turnos)' : t) + '</option>'; }).join('') + '</select></div>' +
     '<div><label>Área</label><select id="e_a">' + AREAS.map(function (a) { return '<option' + (a === p.area ? ' selected' : '') + '>' + a + '</option>'; }).join('') + '</select></div></div>' +
     (p.acceso ? '' : '<p class="mut">Esta persona aún no tiene acceso. Dale usuario y contraseña:</p><div class="row2"><div><label>Usuario</label><input id="e_u" autocapitalize="none"></div><div><label>Contraseña</label><input id="e_p" type="text"></div></div>') +
     '</div><div class="btns"><button data-act="mCancel">Cancelar</button><button class="pri" data-act="mOk">Guardar</button></div></div>');
@@ -1661,6 +1680,7 @@ document.addEventListener('click', async function (ev) {
     case 'ppModo': if (d.m === 'AGREGAR') ppDupDlg(); else ppEnviar('NUEVO'); break;
     case 'ppVolver': ppVolver(); break;
     case 'pedEdit': pedEditDlg(d.id); break;
+    case 'pedAnadir': { await pedFresco(); var pa = pedById(d.id); if (!pa || pa.estado !== 'En preparación') { toast('Ese pedido ya se envió o se canceló', 1); render(); break; } openPed(pa.destino, pa.id); break; }
     case 'peQuitar': PE.items.splice(+d.i, 1); peRender(); break;
     case 'peGuardar': peGuardar(); break;
     case 'pedCancel': confirmDlg('¿Cancelar este pedido sin enviar?', function () { return pedEstado(d.id, 'Cancelado', 'Pedido cancelado'); }, 'Sí, cancelar'); break;
