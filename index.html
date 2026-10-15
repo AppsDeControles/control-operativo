@@ -296,9 +296,9 @@ function today() { return S.hoy || devHoy(); }
 function addD(f, n) { var a = f.split('-'), d = new Date(Date.UTC(+a[0], +a[1] - 1, +a[2] + n)); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
 var DSEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 function fmtF(f) { var a = String(f).split('-'); if (a.length < 3) return f; var d = new Date(Date.UTC(+a[0], +a[1] - 1, +a[2])); return DSEM[d.getUTCDay()] + ' ' + (+a[2]) + '/' + (+a[1]); }
-var TURNOS = ['Matutino', 'Vespertino'], TURNOSU = ['Matutino', 'Vespertino', 'Mixto'], AREAS = ['Cocina', 'Barra', 'Servicio'];
+var TURNOS = ['Matutino', 'Vespertino'], TURNOSU = ['Matutino', 'Vespertino', 'Mixto'], AREAS = ['Cocina', 'Barra', 'Servicio'], SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 function enT(tu, t) { return tu === t || tu === 'Mixto'; }              // 'Mixto' = cubre los dos turnos el mismo día
-var ROLN = { admin: 'Administrador', encargado_sucursal: 'Encargado de sucursal', encargado: 'Encargado de turno y área', colaborador: 'Colaborador' };
+var ROLN = { admin: 'Administrador', encargado_sucursal: 'Encargado de sucursal', encargado: 'Encargado de área', colaborador: 'Colaborador' };
 var LBL = { Momento: 'Momento', Turno: 'Turno', Puesto: 'Área', Actividad: 'Actividad', Equipo: 'Equipo', Area: 'Área', DiasLimpieza: 'Limpiar cada (días)', Modo: 'Limpieza programada', Inicio: 'Inicia el', Categoria: 'Categoría', Articulo: 'Artículo', Unidad: 'Unidad', Proveedor: 'Proveedor', WhatsApp: 'WhatsApp (10 dígitos)', Contacto: 'Contacto', Desde: 'Abre (hora)', Hasta: 'Cierra (hora)', HastaDom: 'Cierra los domingos (solo si es distinto)', Cerrado: 'Días que no atiende (ej. dom, o sáb y dom)', Margen: 'Minutos antes del cierre en que ya no se puede pedir (vacío = 15; almacén = 0)', Grupo: 'Grupo', Tarea: 'Tarea', Compartida: 'Compartida (la hacen y marcan todas las personas del área)' };
 var CATS = {
   actividades: { t: 'Actividades del checklist', campos: ['Momento', 'Turno', 'Puesto', 'Actividad', 'Compartida'], main: 'Actividad', grp: 'Puesto' },
@@ -443,7 +443,8 @@ function nombres() {
   return l;
 }
 function isMgr() { return S.user && (S.user.rol === 'admin' || S.user.rol === 'encargado_sucursal'); }
-function esEnc() { return S.user && S.user.rol !== 'colaborador'; }
+function esColab() { return !!S.user && S.user.rol === 'colaborador' && !(S.user.jefeHoy && S.user.jefeHoy.length); }      // un colaborador que hoy es suplente del encargado de turno ya no cuenta como colaborador
+function esEnc() { return !!S.user && !esColab(); }
 
 /* ================= pantalla general ================= */
 function render() {
@@ -719,7 +720,7 @@ function vHoyProg() {
   else h += pend.map(function (e) { return progRow(e, false); }).join('') + hechas.map(function (e) { return progRow(e, true); }).join('');
   h += '<p class="mut" style="margin:6px 0 0">Palomea cuando se haga. También aparecen en la pantalla de Tareas, en “Programadas de hoy”.</p></div>';
   h += '<div class="card"><h3>🛠️ Daños sin reparar <span class="badge">' + l.danos.length + '</span></h3>' + (l.danos.length ? l.danos.map(function (x, i) {
-    return '<div class="tk rej"><span class="bx lim">🛑</span><div class="tt"><b>' + esc(x.equipo) + '</b><span class="mut">' + (x.area ? esc(x.area) + ' · ' : '') + 'desde ' + esc(fmtF(x.desde)) + (x.reporto ? ' · reportó ' + esc(x.reporto) : '') + (x.nota ? '<br>' + esc(x.nota) : '') + '</span></div><div class="ac">' + (S.user.rol !== 'colaborador' ? '<button class="sm good" data-act="danRep" data-i="' + i + '">✔ Reparado</button>' : '') + '</div></div>';
+    return '<div class="tk rej"><span class="bx lim">🛑</span><div class="tt"><b>' + esc(x.equipo) + '</b><span class="mut">' + (x.area ? esc(x.area) + ' · ' : '') + 'desde ' + esc(fmtF(x.desde)) + (x.reporto ? ' · reportó ' + esc(x.reporto) : '') + (x.nota ? '<br>' + esc(x.nota) : '') + '</span></div><div class="ac">' + (!esColab() ? '<button class="sm good" data-act="danRep" data-i="' + i + '">✔ Reparado</button>' : '') + '</div></div>';
   }).join('') : '<div class="mut">No hay daños abiertos ✅</div>') + '<button class="big dng" style="margin-top:8px" data-act="dmgOpen">⚠ Reportar daño</button></div>';
   var prox = l.prox.filter(function (p) { return p.fecha > S.hoy; });
   if (prox.length) {
@@ -968,7 +969,7 @@ function filaLista(x, t, tipo) {
     if (!yo) ac = '<button class="sm" data-act="planDesc" data-n="' + esc(x.nombre) + '" data-on="1">No vino</button>';
     if (!yo || mg) ac += '<button class="sm" data-act="planMov" data-n="' + esc(x.nombre) + '">Cambiar área</button>';
   } else if (tipo === 'aus') {
-    st = '<span class="badge rd">No vino / descansa</span>';
+    st = '<span class="badge rd">' + (e.semanal ? 'Descansa hoy (día fijo)' : 'No vino / descansa') + '</span>';
     ac = '<button class="sm good" data-act="planDesc" data-n="' + esc(x.nombre) + '" data-on="0">✔ Sí vino</button>';
   } else {
     st = e.descansa ? '<span class="badge rd">Descansa hoy</span>' : '<span class="badge">' + esc(e.turno || 'Sin turno') + (e.area ? ' · ' + esc(e.area) : '') + '</span>';
@@ -982,7 +983,8 @@ function vLista(gate) {
   var pres = P.filter(function (x) { return !x.ef.descansa && enT(x.ef.turno, t); });
   var aus = P.filter(function (x) { return x.ef.descansa && enT(x.turno, t); });
   var otros = P.filter(function (x) { return pres.indexOf(x) < 0 && aus.indexOf(x) < 0; });
-  var h = gate ? '' : '<div class="card"><h3>📋 Pasar lista · ' + esc(t) + ' · hoy</h3><p class="mut" style="margin:0 0 6px">Marca quién está presente. Las actividades se vuelven a repartir solas entre quienes sí están.</p></div>';
+  var h = (S.user && S.user.encT) ? encMiCard() : '';
+  h += gate ? '' : '<div class="card"><h3>📋 Pasar lista · ' + esc(t) + ' · hoy</h3><p class="mut" style="margin:0 0 6px">Marca quién está presente. Las actividades se vuelven a repartir solas entre quienes sí están.</p></div>';
   h += '<div class="card"><h3>Presentes en ' + esc(t) + ' <span class="badge">' + pres.length + '</span></h3>' + (pres.length ? pres.map(function (x) { return filaLista(x, t, 'pres'); }).join('') : '<div class="mut">Nadie asignado a este turno.</div>') + '</div>';
   if (aus.length) h += '<div class="card"><h3>No vinieron <span class="badge rd">' + aus.length + '</span></h3>' + aus.map(function (x) { return filaLista(x, t, 'aus'); }).join('') + '</div>';
   if (otros.length) h += '<div class="card"><h3>Otro personal registrado</h3><p class="mut" style="margin:0 0 6px">Personal de otro turno, que descansa o que no está asignado: márcalo presente para que cubra hoy en ' + esc(t) + '.</p>' + otros.map(function (x) { return filaLista(x, t, 'otro'); }).join('') + '</div>';
@@ -999,7 +1001,7 @@ function vPlan() {
   if (!d) return h + loadingCard();
   var nm = d.personas.map(function (x) { return x.nombre; });
   TURNOS.forEach(function (t) {
-    h += '<div class="card"><h3>' + esc(t) + (d.cerrados[t] ? ' <span class="badge rd">sin operación</span>' : '') + '</h3>';
+    h += '<div class="card"><h3>' + esc(t) + (d.cerrados[t] ? ' <span class="badge rd">sin operación</span>' : '') + '</h3>' + encTurnoBlock(t, d, nm);
     AREAS.forEach(function (a) {
       var c = d.combos.filter(function (x) { return x.turno === t && x.area === a; })[0];
       h += '<label>Encargado de ' + esc(a) + (c.cambio ? ' <span class="badge am">cambio del día</span>' : '') + '</label><select data-pe="' + t + '|' + a + '"><option value="">' + (c.titulares.length ? 'Titular: ' + esc(c.titulares.join(', ')) : '(sin titular)') + '</option>' +
@@ -1008,7 +1010,7 @@ function vPlan() {
     h += '<button class="sm" style="margin-top:10px" data-act="planCerr" data-t="' + t + '" data-on="' + (d.cerrados[t] ? 0 : 1) + '">' + (d.cerrados[t] ? 'Quitar “sin operación”' : 'Marcar turno sin operación') + '</button></div>';
   });
   h += '<div class="card"><h3>Personal del día</h3>' + d.personas.map(function (x) {
-    var e = x.ef, st = e.descansa ? '<span class="badge rd">Descansa / falta</span>' : (e.movido ? '<span class="badge am">Hoy: ' + esc(e.turno) + ' · ' + esc(e.area) + '</span>' : (e.turno ? '<span class="badge">' + esc(e.turno) + ' · ' + esc(e.area) + '</span>' : '<span class="badge rd">Sin turno/área</span>'));
+    var e = x.ef, st = e.descansa ? '<span class="badge rd">' + (e.semanal ? 'Descansa (día fijo)' : 'Descansa / falta') + '</span>' : (e.movido ? '<span class="badge am">Hoy: ' + esc(e.turno) + ' · ' + esc(e.area) + '</span>' : (e.turno ? '<span class="badge">' + esc(e.turno) + ' · ' + esc(e.area) + '</span>' : '<span class="badge rd">Sin turno/área</span>'));
     return '<div class="li"><div class="n"><b>' + esc(x.nombre) + '</b> ' + st + '<div class="mut">' + esc(ROLN[x.rol]) + (x.turno ? ' · titular ' + esc(x.turno) + ' · ' + esc(x.area) : '') + '</div></div>' +
       '<button class="sm" data-act="planDesc" data-n="' + esc(x.nombre) + '" data-on="' + (e.descansa ? 0 : 1) + '">' + (e.descansa ? 'Vuelve' : 'Descansa') + '</button>' +
       '<button class="sm" data-act="planMov" data-n="' + esc(x.nombre) + '">Mover</button></div>';
@@ -1025,6 +1027,37 @@ async function loadPlan() {
 async function planSet(o, msg) {
   o.fecha = S.plan.fecha;
   try { await run(call('planSet', o)); toast(msg || 'Guardado ✔'); await loadPlan(); loadAvi(); } catch (e) { loadPlan(); }
+}
+function encTurnoBlock(t, d, nm) {                  // quién es hoy el encargado del turno, cambio por un día y el suplente fijo de cada titular
+  var j = (d.jefes || {})[t];
+  if (!j) return '';
+  var h = '<label>Encargado del turno' + (j.cambio ? ' <span class="badge am">cambio del día</span>' : '') + '</label><select data-pj="' + t + '"><option value="">' +
+    (j.tit.length ? 'Titular: ' + esc(j.tit.map(function (x) { return x.nombre; }).join(', ')) + ' (con su suplente)' : '(sin titular: márcalo en Equipo)') + '</option>' +
+    nm.map(function (n) { return '<option' + (j.cambio && j.nombre === n ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select>';
+  h += j.nombre ? '<div class="mut" style="margin:4px 0 8px">Hoy está a cargo: <b>' + esc(j.nombre) + '</b></div>' : '<div style="margin:6px 0 8px"><span class="badge rd">⚠️ Sin encargado de turno hoy</span></div>';
+  j.tit.forEach(function (x) {
+    h += '<div class="li"><div class="n"><b>' + esc(x.nombre) + '</b> <span class="mut">titular · descansa: ' + esc(x.desc || 'sin día fijo') + ' · suplente: ' + esc(x.sup || 'ninguno') + '</span></div><button class="sm" data-act="encCfg" data-n="' + esc(x.nombre) + '">Descanso y suplente</button></div>';
+  });
+  return h;
+}
+function encMiCard() {                              // para el encargado de turno: su día de descanso y su suplente fijo
+  var u = S.user;
+  return '<div class="card"><h3>⭐ Encargado de turno</h3><div class="li"><div class="n"><span class="mut">Descansas: <b>' + esc(u.descanso || 'sin día fijo') + '</b> · Suplente: <b>' + esc(u.suplente || 'ninguno') + '</b></span></div>' +
+    '<button class="sm" data-act="encCfg" data-n="' + esc(u.nombre) + '">Cambiar</button></div></div>';
+}
+function encCfgDlg(n) {
+  var p = (S.team || []).filter(function (x) { return x.nombre === n; })[0] || (S.user.nombre === n ? S.user : null);
+  if (!p) return;
+  openModal('<div class="mb"><h3>Descanso y suplente · ' + esc(n) + '</h3><div class="scr"><p class="mut">El día de descanso, el suplente es el encargado del turno. Se puede cambiar cuando haga falta.</p>' + encDescSup(p, 'c_') + '</div>' +
+    '<div class="btns"><button data-act="mCancel">Cancelar</button><button class="pri" data-act="mOk">Guardar</button></div></div>');
+  MOK = async function () {
+    try { await run(call('encCfg', { nombre: n, descanso: $('#c_d').value, suplente: $('#c_s').value })); closeModal(); toast('Guardado ✔'); await refresh(); if (S.plan && S.plan.data) loadPlan(); } catch (e) {}
+  };
+}
+function encDescSup(p, pre) {                       // selectores de día de descanso y suplente
+  var nm = (S.team || []).map(function (x) { return x.nombre; }).filter(function (x) { return x !== p.nombre; });
+  return '<div class="row2"><div><label>Día de descanso</label><select id="' + pre + 'd">' + selOpts([['', 'Sin día fijo']].concat(SEMANA), p.descanso || '') + '</select></div>' +
+    '<div><label>Suplente fijo</label><select id="' + pre + 's">' + selOpts([['', '(ninguno)']].concat(nm), p.suplente || '') + '</select></div></div>';
 }
 function movDlg(n) {
   var p = S.plan.data.personas.filter(function (x) { return x.nombre === n; })[0], e = p.ef;
@@ -1128,7 +1161,7 @@ function vPed() {
   return h;
 }
 function pedCard(p) {
-  var col = p.estado === 'En preparación' ? 'am' : (p.estado === 'Enviado' ? 'bl' : 'gr'), viejo = p.estado === 'Enviado' && p.fenv && (p.fesp ? S.hoy > p.fesp : dd(p.fenv) >= 2), col2 = S.user.rol === 'colaborador';
+  var col = p.estado === 'En preparación' ? 'am' : (p.estado === 'Enviado' ? 'bl' : 'gr'), viejo = p.estado === 'Enviado' && p.fenv && (p.fesp ? S.hoy > p.fesp : dd(p.fenv) >= 2), col2 = esColab();
   var h = '<div class="card' + (viejo ? ' pend' : '') + '"><div class="gh" style="margin-top:0"><b>' + esc(p.destino) + '</b><span class="badge ' + col + '">' + esc(p.estado) + '</span></div>' +
     '<div class="mut">Capturó ' + esc(p.por) + ' · ' + esc(p.turno) + ' · ' + esc(fmtF(p.fecha)) + ' ' + esc(p.hora) + (p.estado !== 'En preparación' && p.fenv ? '<br>Enviado ' + esc(fmtF(p.fenv)) + ' ' + esc(p.henv) + ' por ' + esc(p.penv) : '') + (p.estado === 'Enviado' && p.fesp ? '<br>Llegada esperada: ' + esc(fmtF(p.fesp)) : '') + (p.frec ? '<br>Recibido ' + esc(fmtF(p.frec)) + ' por ' + esc(p.prec) : '') + '</div>' +
     (viejo ? '<div class="alert" style="margin-top:8px">⚠ ' + (p.fesp ? 'Debía llegar ' + esc(fmtF(p.fesp)) + ' y no se ha confirmado la llegada.' : 'Enviado hace ' + dd(p.fenv) + ' días y sin confirmar llegada.') + '</div>' : '') +
@@ -1264,7 +1297,7 @@ function pedTexto(p) {
     p.items.map(function (i) { return '- ' + i.art + ' – ' + fq(i.cant) + ' ' + i.u; }).join('\n') + '\n\nGracias.';
 }
 function pedTextoDlg(id) {
-  var p = pedById(id), t = pedTexto(p), dest = S.ped.data.destinos.filter(function (x) { return x.nombre === p.destino; })[0] || {}, col = S.user.rol === 'colaborador';
+  var p = pedById(id), t = pedTexto(p), dest = S.ped.data.destinos.filter(function (x) { return x.nombre === p.destino; })[0] || {}, col = esColab();
   var link = 'https://wa.me/' + (dest.wa || '') + '?text=' + encodeURIComponent(t);
  openModal('<div class="mb"><h3>Pedido a ' + esc(p.destino) + '</h3>' + (p.estado === 'En preparación' && dest.est && dest.est.msg ? '<div class="' + horCls(dest.est) + '" style="margin:0 0 8px;font-size:13px">' + (horCls(dest.est) === 'alert' ? '⏰ ' : '🕘 ') + esc(dest.est.msg) + '</div>' : '') + '<div class="scr"><textarea id="pt" class="pedt" readonly>' + esc(t) + '</textarea>' +
     '<p class="mut" style="margin:6px 0">' + (dest.wa ? 'Se abrirá el chat con ' + esc(p.destino) + (dest.contacto ? ' (' + esc(dest.contacto) + ')' : '') + '.' : 'Este proveedor no tiene WhatsApp guardado: elegirás el contacto en WhatsApp. Puedes guardarlo en Más › Ajustes.') + '</p></div>' +
@@ -1514,7 +1547,7 @@ function vTeam() {
   var admin = S.user.rol === 'admin', roles = admin ? ['admin', 'encargado_sucursal', 'encargado', 'colaborador'] : ['encargado', 'colaborador'];
   return '<div class="card"><h3>Equipo · ' + esc(S.suc) + '</h3><p class="mut" style="margin:0 0 6px">Cada persona tiene su cuenta, su turno y su área. El plan del día (Más › Plan del día) permite cambios por un solo día.</p>' + S.team.map(function (p) {
     var edit = admin || ['encargado', 'colaborador'].indexOf(p.rol) >= 0, me = p.nombre === S.user.nombre;
-    return '<div class="li"><div class="n"><b>' + esc(p.nombre) + '</b> <span class="badge">' + esc(ROLN[p.rol] || p.rol) + '</span><div class="mut">' + (p.turno ? esc(p.turno) + ' · ' + esc(p.area) : '<b style="color:#c4291a">Sin turno/área</b>') + (p.acceso ? '' : ' · sin acceso') + '</div></div>' +
+    return '<div class="li"><div class="n"><b>' + esc(p.nombre) + '</b> <span class="badge">' + esc(ROLN[p.rol] || p.rol) + '</span><div class="mut">' + (p.turno ? esc(p.turno) + ' · ' + esc(p.area) : '<b style="color:#c4291a">Sin turno/área</b>') + (p.acceso ? '' : ' · sin acceso') + (p.encT ? ' · ⭐ encargado de turno' : '') + (p.descanso ? ' · descansa ' + esc(p.descanso) : '') + (p.suplente ? ' · suplente ' + esc(p.suplente) : '') + '</div></div>' +
       (edit || me ? '<button class="sm" data-act="teamEdit" data-n="' + esc(p.nombre) + '">✏️</button>' : '') +
       (p.acceso && !me && edit ? '<button class="sm" data-act="teamPass" data-n="' + esc(p.nombre) + '">🔑</button>' : '') +
       (!me && edit ? '<button class="sm dng" data-act="teamDel" data-n="' + esc(p.nombre) + '">Quitar</button>' : '') + '</div>';
@@ -1523,6 +1556,7 @@ function vTeam() {
     '<div class="row2"><div><label>Rol</label><select id="t_r">' + roles.map(function (r) { return '<option value="' + r + '">' + ROLN[r] + '</option>'; }).join('') + '</select></div>' +
     '<div><label>Turno</label><select id="t_t">' + TURNOSU.map(function (t) { return '<option value="' + t + '">' + (t === 'Mixto' ? 'Mixto (los dos turnos)' : t) + '</option>'; }).join('') + '</select></div></div>' +
     '<label>Área</label><select id="t_a">' + AREAS.map(function (a) { return '<option>' + a + '</option>'; }).join('') + '</select>' +
+    '<label style="display:flex;gap:8px;align-items:center;color:var(--ink);font-size:15px;margin-top:8px"><input type="checkbox" id="t_enc" style="width:auto"' + (false ? ' checked' : '') + '> Es encargado de turno (pasa lista, cierra el turno y supervisa a los encargados de área)</label>' + encDescSup({ nombre: '' }, 't_') +
     '<div class="row2"><div><label>Usuario</label><input id="t_u" autocapitalize="none" autocorrect="off"></div><div><label>Contraseña</label><input id="t_p" type="text" autocomplete="off"></div></div>' +
     '<button class="pri big" data-act="teamAdd">Agregar</button></div>';
 }
@@ -1533,10 +1567,11 @@ function teamEditDlg(n) {
   openModal('<div class="mb"><h3>' + esc(n) + '</h3><div class="scr">' + (propio ? '' : '<label>Rol</label><select id="e_r">' + roles.map(function (r) { return '<option value="' + r + '"' + (r === p.rol ? ' selected' : '') + '>' + ROLN[r] + '</option>'; }).join('') + '</select>') +
     '<div class="row2"><div><label>Turno</label><select id="e_t">' + TURNOSU.map(function (t) { return '<option value="' + t + '"' + (t === p.turno ? ' selected' : '') + '>' + (t === 'Mixto' ? 'Mixto (los dos turnos)' : t) + '</option>'; }).join('') + '</select></div>' +
     '<div><label>Área</label><select id="e_a">' + AREAS.map(function (a) { return '<option' + (a === p.area ? ' selected' : '') + '>' + a + '</option>'; }).join('') + '</select></div></div>' +
+    '<label style="display:flex;gap:8px;align-items:center;color:var(--ink);font-size:15px;margin-top:8px"><input type="checkbox" id="e_enc" style="width:auto"' + (p.encT ? ' checked' : '') + '> Es encargado de turno (pasa lista, cierra el turno y supervisa a los encargados de área)</label>' + encDescSup(p, 'e_') +
     (p.acceso ? '' : '<p class="mut">Esta persona aún no tiene acceso. Dale usuario y contraseña:</p><div class="row2"><div><label>Usuario</label><input id="e_u" autocapitalize="none"></div><div><label>Contraseña</label><input id="e_p" type="text"></div></div>') +
     '</div><div class="btns"><button data-act="mCancel">Cancelar</button><button class="pri" data-act="mOk">Guardar</button></div></div>');
   MOK = async function () {
-    var d = { nombre: n, turno: $('#e_t').value, area: $('#e_a').value };
+    var d = { nombre: n, turno: $('#e_t').value, area: $('#e_a').value, encT: $('#e_enc').checked ? 'SI' : '', descanso: $('#e_d').value, suplente: $('#e_s').value };
     if ($('#e_r')) d.rol = $('#e_r').value;
     if ($('#e_u')) { d.usuario = $('#e_u').value; d.pass = $('#e_p').value; }
     try { await run(call('teamEdit', d)); closeModal(); toast('Guardado ✔'); await refresh(); } catch (e) {}
@@ -1701,6 +1736,7 @@ document.addEventListener('click', async function (ev) {
       break;
     case 'teamPass': passDlg(d.n); break;
     case 'teamEdit': teamEditDlg(d.n); break;
+    case 'encCfg': encCfgDlg(d.n); break;
     case 'teamDel':
       confirmDlg('¿Quitar a ' + d.n + ' del equipo?', async function () {
         closeModal();
@@ -1709,7 +1745,7 @@ document.addEventListener('click', async function (ev) {
       break;
     case 'teamAdd':
       try {
-        await run(call('teamAdd', { nombre: $('#t_n').value, rol: $('#t_r').value, turno: $('#t_t').value, area: $('#t_a').value, usuario: $('#t_u').value, pass: $('#t_p').value }));
+        await run(call('teamAdd', { nombre: $('#t_n').value, rol: $('#t_r').value, turno: $('#t_t').value, area: $('#t_a').value, encT: $('#t_enc').checked ? 'SI' : '', descanso: $('#t_d').value, suplente: $('#t_s').value, usuario: $('#t_u').value, pass: $('#t_p').value }));
         toast('Persona agregada ✔'); await refresh();
       } catch (e) {}
       break;
@@ -1773,6 +1809,7 @@ document.addEventListener('change', function (ev) {
     run(logoFromFile(f)).then(function (u2) { return run(call('brandSet', { logo: u2 })); }).then(function () { toast('Logo guardado ✔'); return refresh(); }).catch(function () {});
     return;
   }
+  if (ds.pj) { planSet({ tipo: 'ENCTURNO', turno: ds.pj, usuario: el.value }, el.value ? 'Encargado del turno de hoy guardado ✔' : 'Vuelve el titular'); return; }
   if (ds.pe) { var p = ds.pe.split('|'); planSet({ tipo: 'ENCARGADO', turno: p[0], area: p[1], usuario: el.value }, el.value ? 'Encargado del día guardado ✔' : 'Vuelve el titular'); return; }
   if (ds.b) {
     setPath(ds.b, el.value);
